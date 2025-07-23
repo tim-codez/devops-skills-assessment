@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment # Changed from Deploy (doesn't exist) to Deployment
+metadata:
+  name: nginx-deploy
+  labels:
+    app: nginx
+spec:
+  replicas: 1 # Added replicas (recommended default)
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.29.0 # Changed from nginx:current to nginx:1.29.0 (a. the tag 'current' doesn't exist & b. Its not good practice to deploy the "latest" tag, best to pin a version down, in this case 1.29.0)
+        ports:
+        - containerPort: 80
+        resources: # Added resources block
+          requests:
+            cpu: "200m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "256Mi"
