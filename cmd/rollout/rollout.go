@@ -11,41 +11,34 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-type RolloutMetadata struct {
-	StartTime             time.Time
-	DeploymentsRestarted  int
-	StatefulSetsRestarted int
-	DaemonSetsRestarted   int
-	NamespacesProcessed   int
-	Errors                []error
-}
-
-func (rm *RolloutMetadata) TotalRestarted() int {
-	return rm.DeploymentsRestarted + rm.StatefulSetsRestarted + rm.DaemonSetsRestarted
-}
-
-func (rm *RolloutMetadata) Duration() time.Duration {
-	return time.Since(rm.StartTime)
-}
-
-type RolloutClient struct {
-	podFilter string
-
-	cs       *kubernetes.Clientset
-	log      logrus.FieldLogger
-	metadata *RolloutMetadata
-}
-
-func NewRolloutClient(clientset *kubernetes.Clientset, podFilter string, logger logrus.FieldLogger) *RolloutClient {
-	return &RolloutClient{
-		podFilter: podFilter,
-		cs:        clientset,
-		log:       logger,
-	}
-}
-
-func (rc *RolloutClient) Run(ctx context.Context) error {
-	rc.metadata = &RolloutMetadata{
+// Run executes a graceful rolling restart of all Kubernetes workloads (Deployments, StatefulSets, and DaemonSets)
+// that contain the podFilter string in their name across all namespaces in the cluster.
+//
+// The restart is performed by updating the pod template annotation with a timestamp, which triggers
+// Kubernetes to perform a rolling update of the pods - similar to 'kubectl rollout restart'.
+//
+// The function will:
+//   - List and iterate through all namespaces in the cluster
+//   - For each namespace, identify Deployments, StatefulSets, and DaemonSets matching the podFilter
+//   - Apply a restart annotation to trigger a graceful rollout
+//   - Track success/failure metrics for each resource type
+//   - Continue processing even if individual resources fail to restart
+//
+// Errors during restart of individual resources are logged but don't stop the overall process.
+// Only critical errors (like inability to list namespaces) will cause the function to return early.
+//
+// On completion, a summary is logged showing:
+//   - Total number of resources restarted by type
+//   - Number of namespaces processed
+//   - Any errors encountered
+//   - Total execution time
+//
+// Example usage:
+//
+//	rc := rollout.NewRolloutClient(clientset, "database", logger)
+//	err := rc.Run(context.Background())
+func (rc *rolloutClient) Run(ctx context.Context) error {
+	rc.metadata = &rolloutMetadata{
 		StartTime: time.Now(),
 		Errors:    []error{},
 	}
@@ -99,18 +92,52 @@ func (rc *RolloutClient) Run(ctx context.Context) error {
 
 	// Log summary with metadata
 	rc.log.WithFields(logrus.Fields{
-		"total_restarted":    rc.metadata.TotalRestarted(),
+		"total_restarted":    rc.metadata.totalRestarted(),
 		"deployments":        rc.metadata.DeploymentsRestarted,
 		"statefulsets":       rc.metadata.StatefulSetsRestarted,
 		"daemonsets":         rc.metadata.DaemonSetsRestarted,
 		"namespaces_checked": rc.metadata.NamespacesProcessed,
 		"errors_count":       len(rc.metadata.Errors),
-		"duration":           rc.metadata.Duration().String(),
+		"duration":           rc.metadata.duration().String(),
 	}).Info("Rollout completed")
 	return nil
 }
 
-func (rc *RolloutClient) restartDeployments(ctx context.Context, namespace string) (int, error) {
+// NewRolloutClient creates a new rolloutClient instance for performing rolling restarts of Kubernetes workloads.
+func NewRolloutClient(clientset *kubernetes.Clientset, podFilter string, logger logrus.FieldLogger) *rolloutClient {
+	return &rolloutClient{
+		podFilter: podFilter,
+		cs:        clientset,
+		log:       logger,
+	}
+}
+
+type rolloutClient struct {
+	podFilter string
+
+	cs       *kubernetes.Clientset
+	log      logrus.FieldLogger
+	metadata *rolloutMetadata
+}
+
+type rolloutMetadata struct {
+	StartTime             time.Time
+	DeploymentsRestarted  int
+	StatefulSetsRestarted int
+	DaemonSetsRestarted   int
+	NamespacesProcessed   int
+	Errors                []error
+}
+
+func (rm *rolloutMetadata) totalRestarted() int {
+	return rm.DeploymentsRestarted + rm.StatefulSetsRestarted + rm.DaemonSetsRestarted
+}
+
+func (rm *rolloutMetadata) duration() time.Duration {
+	return time.Since(rm.StartTime)
+}
+
+func (rc *rolloutClient) restartDeployments(ctx context.Context, namespace string) (int, error) {
 	deployments, err := rc.cs.AppsV1().Deployments(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return 0, err
@@ -146,7 +173,7 @@ func (rc *RolloutClient) restartDeployments(ctx context.Context, namespace strin
 	return count, nil
 }
 
-func (rc *RolloutClient) restartStatefulSets(ctx context.Context, namespace string) (int, error) {
+func (rc *rolloutClient) restartStatefulSets(ctx context.Context, namespace string) (int, error) {
 	statefulSets, err := rc.cs.AppsV1().StatefulSets(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return 0, err
@@ -182,7 +209,7 @@ func (rc *RolloutClient) restartStatefulSets(ctx context.Context, namespace stri
 	return count, nil
 }
 
-func (rc *RolloutClient) restartDaemonSets(ctx context.Context, namespace string) (int, error) {
+func (rc *rolloutClient) restartDaemonSets(ctx context.Context, namespace string) (int, error) {
 	daemonSets, err := rc.cs.AppsV1().DaemonSets(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return 0, err
