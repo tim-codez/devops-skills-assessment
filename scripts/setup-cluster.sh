@@ -1,5 +1,11 @@
 #!/bin/bash
 
+####################################
+# Copied from another project of mine
+# Just helps provision a cluster to 
+# speed up time during the interview
+###################################
+
 # Script:  setup-cluster.sh
 # Purpose: Provision and manage the lifecycle of a Kubernetes cluster utilizing Kind (Kubernetes-in-docker).
 

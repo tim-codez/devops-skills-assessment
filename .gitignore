@@ -1,1 +1,2 @@
 scripts/kind-cluster.yaml
+build/*
